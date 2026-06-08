@@ -1,0 +1,26 @@
+{
+  "name": "lx-music-api-server-workers",
+  "version": "1.0.0",
+  "description": "lx-music API server for Cloudflare Workers",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev --ip 0.0.0.0",
+    "deploy": "wrangler deploy",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.3.0",
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0",
+    "@types/crypto-js": "^4.2.0",
+    "wrangler": "^3.28.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "@vitest/ui": "^1.2.0",
+    "miniflare": "^3.20240129.0"
+  }
+}
