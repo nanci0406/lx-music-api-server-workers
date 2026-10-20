@@ -1,100 +1,51 @@
-import type { KVNamespace } from '@cloudflare/workers-types';
-import type { MusicSource, Quality } from '../types/music';
-import { SOURCE_EXPIRATION_TIME } from '../types/music';
+// 缓存(D1 的 cache 表)：解析得到的播放链接、歌词、平台接口的响应。
+// 过期的记录读取时视为不存在，每小时由定时任务清理一次。
 
-export class CacheManager {
-  constructor(private kv: KVNamespace) {}
+import { now } from './utils';
+import { log } from './log';
 
-  // ==================== URL 缓存 ====================
+const logger = log('cache');
 
-  async getUrl(source: MusicSource, songId: string, quality: Quality) {
-    const key = `url:${source}:${songId}:${quality}`;
-    const cached = await this.kv.get(key, 'json');
-    if (!cached) return null;
-
-    return cached as {
-      url: string;
-      quality: Quality;
-      time: number;
-      expire: boolean;
-    };
+export async function getCache<T>(db: D1Database, key: string): Promise<T | null> {
+  try {
+    const row = await db
+      .prepare('SELECT data, expire_at FROM cache WHERE key = ?')
+      .bind(key)
+      .first<{ data: string; expire_at: number | null }>();
+    return parseCacheRow<T>(row);
+  } catch (e) {
+    logger.warning(`读取缓存失败: ${e}`);
+    return null;
   }
+}
 
-  async setUrl(
-    source: MusicSource,
-    songId: string,
-    quality: Quality,
-    data: { url: string; quality: Quality }
-  ) {
-    const key = `url:${source}:${songId}:${quality}`;
-    const config = SOURCE_EXPIRATION_TIME[source];
-
-    const cacheData = {
-      ...data,
-      time: Math.floor(Date.now() / 1000),
-      expire: config.expire
-    };
-
-    const options: any = {};
-    if (config.expire) {
-      // 取有效期的75%作为缓存时长
-      options.expirationTtl = Math.floor(config.time * 0.75);
-    }
-
-    await this.kv.put(key, JSON.stringify(cacheData), options);
+export function parseCacheRow<T>(row: { data: string; expire_at: number | null } | null): T | null {
+  if (!row) return null;
+  if (row.expire_at !== null && row.expire_at !== undefined && row.expire_at <= now()) return null;
+  try {
+    return JSON.parse(row.data) as T;
+  } catch {
+    return null;
   }
+}
 
-  // ==================== 歌词缓存 ====================
+export function cacheStatement(db: D1Database, key: string, data: unknown, ttl: number | null): D1PreparedStatement {
+  return db
+    .prepare('INSERT INTO cache (key, data, expire_at) VALUES (?, ?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET data = excluded.data, expire_at = excluded.expire_at')
+    .bind(key, JSON.stringify(data), ttl === null ? null : now() + Math.max(1, Math.floor(ttl)));
+}
 
-  async getLyric(source: MusicSource, songId: string) {
-    const key = `lyric:${source}:${songId}`;
-    return this.kv.get(key, 'json');
+/** 写入缓存；ttl 为秒，null 表示不过期 */
+export async function setCache(db: D1Database, key: string, data: unknown, ttl: number | null): Promise<void> {
+  try {
+    await cacheStatement(db, key, data, ttl).run();
+  } catch (e) {
+    logger.warning(`写入缓存失败: ${e}`);
   }
+}
 
-  async setLyric(source: MusicSource, songId: string, data: any) {
-    const key = `lyric:${source}:${songId}`;
-    await this.kv.put(key, JSON.stringify(data), {
-      expirationTtl: 259200 // 3天
-    });
-  }
-
-  // ==================== HTTP 响应缓存 ====================
-
-  async getHttpCache(cacheKey: string) {
-    return this.kv.get(cacheKey, 'json');
-  }
-
-  async setHttpCache(cacheKey: string, data: any, ttl: number) {
-    await this.kv.put(cacheKey, JSON.stringify(data), {
-      expirationTtl: ttl
-    });
-  }
-
-  // ==================== 限速记录 ====================
-
-  async getRateLimitTime(key: string): Promise<number | null> {
-    const value = await this.kv.get(key);
-    return value ? parseInt(value) : null;
-  }
-
-  async setRateLimitTime(key: string, timestamp: number, ttl: number = 60) {
-    await this.kv.put(key, timestamp.toString(), { expirationTtl: ttl });
-  }
-
-  // ==================== 会话存储 ====================
-
-  async getSession(token: string) {
-    const key = `session:${token}`;
-    return this.kv.get(key, 'json');
-  }
-
-  async setSession(token: string, data: any, ttl: number = 86400) {
-    const key = `session:${token}`;
-    await this.kv.put(key, JSON.stringify(data), { expirationTtl: ttl });
-  }
-
-  async deleteSession(token: string) {
-    const key = `session:${token}`;
-    await this.kv.delete(key);
-  }
+export async function cleanupExpiredCache(db: D1Database): Promise<number> {
+  const result = await db.prepare('DELETE FROM cache WHERE expire_at IS NOT NULL AND expire_at <= ?').bind(now()).run();
+  return result.meta.changes;
 }

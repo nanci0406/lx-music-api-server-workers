@@ -1,208 +1,89 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
+cd /d "%~dp0"
 
-:: LX Music API Server - 一键部署脚本 (Windows)
+:: LX Music API Server (Workers) - 一键部署脚本(Windows)
+:: 依次完成：安装依赖 → 登录 Cloudflare → 创建 D1 数据库 → 初始化表结构 → 部署 → 设置管理员密码
+:: 可以重复执行：已有的数据库会直接使用，升级时再运行一次即可。
+
+set DB_NAME=lx-music-api-db
 
 echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 🚀 LX Music API Server - 一键部署脚本
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo ━━ 1/6 检查环境
+where node >nul 2>&1 || (echo 没有找到 Node.js，请先安装 Node.js 20 或更高版本：https://nodejs.org/ & pause & exit /b 1)
+for /f "tokens=*" %%i in ('node -p "process.versions.node.split('.')[0]"') do set NODE_MAJOR=%%i
+if !NODE_MAJOR! LSS 20 (echo Node.js 版本太低，需要 20 或更高版本 & pause & exit /b 1)
+for /f "tokens=*" %%i in ('node -v') do echo √ Node.js %%i
+
 echo.
-echo 欢迎使用 LX Music API Server 自动部署工具！
+echo ━━ 2/6 安装依赖
+call npm install --no-audit --no-fund || (echo 依赖安装失败 & pause & exit /b 1)
+
 echo.
-echo 本脚本将帮助你完成以下操作：
-echo   1. 检查环境依赖
-echo   2. 安装必要工具
-echo   3. 登录 Cloudflare
-echo   4. 创建 D1 数据库
-echo   5. 初始化数据库
-echo   6. 部署到 Cloudflare Workers
+echo ━━ 3/6 登录 Cloudflare
+call npx --no-install wrangler whoami --json >nul 2>&1
+if errorlevel 1 (
+  echo 即将打开浏览器登录 Cloudflare……
+  call npx --no-install wrangler login || (echo 登录失败 & pause & exit /b 1)
+)
+:: 登录的用户有多个账号时选一个(只对这次运行生效；也可以提前设置环境变量 CLOUDFLARE_ACCOUNT_ID)
+call npx --no-install wrangler whoami --json > "%TEMP%\lx-whoami.json"
+if "%CLOUDFLARE_ACCOUNT_ID%"=="" (
+  for /f "tokens=*" %%i in ('node -e "const a=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).accounts||[];console.log(a.length)" "%TEMP%\lx-whoami.json"') do set ACCOUNT_COUNT=%%i
+  if !ACCOUNT_COUNT! GTR 1 (
+    echo 这个用户有多个 Cloudflare 账号：
+    node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).accounts.forEach((a,i)=>console.log('  '+(i+1)+'. '+a.name+' ('+a.id+')'))" "%TEMP%\lx-whoami.json"
+    set CHOICE=1
+    set /p CHOICE=选择要部署到的账号 [1]: 
+    for /f "tokens=*" %%i in ('node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).accounts[Number(process.argv[2])-1].id)" "%TEMP%\lx-whoami.json" !CHOICE!') do set CLOUDFLARE_ACCOUNT_ID=%%i
+  )
+)
+del "%TEMP%\lx-whoami.json" >nul 2>&1
+echo √ 已登录
+
 echo.
+echo ━━ 4/6 准备 D1 数据库
+call :find_db
+if "!DB_ID!"=="" (
+  echo 创建数据库 %DB_NAME%^(主节点放在亚太地区，离国内更近^)……
+  call npx --no-install wrangler d1 create %DB_NAME% --location apac >nul
+  call :find_db
+  if "!DB_ID!"=="" (echo 创建数据库失败，请执行 npx wrangler d1 create %DB_NAME% 查看原因 & pause & exit /b 1)
+  echo √ 数据库已创建
+) else (
+  echo √ 使用已有的数据库
+)
+node -e "const fs=require('fs');fs.writeFileSync('wrangler.toml',fs.readFileSync('wrangler.toml','utf8').replace(/^database_id *= *\".*\"/m,'database_id = \"'+process.argv[1]+'\"'))" "!DB_ID!"
+echo √ database_id = !DB_ID!
+
+echo.
+echo ━━ 5/6 初始化表结构
+call npx --no-install wrangler d1 execute %DB_NAME% --remote --file=./src/db/schema.sql >nul || (echo 初始化表结构失败 & pause & exit /b 1)
+echo √ 表结构已就绪
+
+echo.
+echo ━━ 6/6 部署
+call npx --no-install wrangler deploy || (echo 部署失败 & pause & exit /b 1)
+
+echo.
+echo 设置管理员密码：直接回车跳过，稍后在浏览器里打开管理后台创建管理员
+set ADMIN_PASSWORD=
+set /p ADMIN_PASSWORD=管理员密码(至少 8 位，输入时会显示):
+if not "!ADMIN_PASSWORD!"=="" (
+  node -e "process.exit(process.argv[1].length>=8?0:1)" "!ADMIN_PASSWORD!" || (echo 密码至少需要 8 位，请重新运行脚本 & pause & exit /b 1)
+  node -e "process.stdout.write(process.argv[1])" "!ADMIN_PASSWORD!" | npx --no-install wrangler secret put ADMIN_PASSWORD >nul
+  echo √ 已设置^(用户名 admin，只在还没有管理员时生效^)
+) else (
+  echo ! 请尽快打开管理后台 /admin 创建管理员账号，在此之前任何人打开后台都可以创建
+)
+
+echo.
+echo 全部完成！管理后台地址为部署输出里的 https://….workers.dev/admin
 pause
+exit /b 0
 
-:: 步骤 1: 检查环境
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 1/6: 检查环境依赖
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-echo ℹ️  检查 Node.js...
-node -v >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ Node.js 未安装
-    echo ℹ️  请先安装 Node.js 18 或更高版本: https://nodejs.org/
-    pause
-    exit /b 1
-)
-for /f "tokens=*" %%i in ('node -v') do set NODE_VERSION=%%i
-echo ✅ Node.js 已安装: %NODE_VERSION%
-
-echo ℹ️  检查 npm...
-npm -v >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ npm 未安装
-    pause
-    exit /b 1
-)
-for /f "tokens=*" %%i in ('npm -v') do set NPM_VERSION=%%i
-echo ✅ npm 已安装: %NPM_VERSION%
-
-:: 步骤 2: 安装 Wrangler
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 2/6: 安装 Wrangler CLI
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-wrangler --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ℹ️  正在安装 Wrangler...
-    call npm install -g wrangler
-    if %errorlevel% neq 0 (
-        echo ❌ Wrangler 安装失败
-        pause
-        exit /b 1
-    )
-    echo ✅ Wrangler 安装完成
-) else (
-    for /f "tokens=*" %%i in ('wrangler --version') do set WRANGLER_VERSION=%%i
-    echo ✅ Wrangler 已安装: !WRANGLER_VERSION!
-)
-
-:: 步骤 3: 登录 Cloudflare
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 3/6: 登录 Cloudflare
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-echo ℹ️  即将打开浏览器进行 Cloudflare 登录...
-echo ⚠️  如果已经登录，可以跳过此步骤
-pause
-
-call wrangler login
-if %errorlevel% neq 0 (
-    echo ❌ 登录失败，请检查网络连接
-    pause
-    exit /b 1
-)
-echo ✅ 登录成功
-
-:: 步骤 4: 创建 D1 数据库
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 4/6: 创建 D1 数据库
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-echo ℹ️  正在创建数据库...
-call wrangler d1 create lx-music-api-db > db_output.txt 2>&1
-
-findstr /C:"database_id" db_output.txt >nul
-if %errorlevel% equ 0 (
-    echo ✅ 数据库创建成功
-
-    :: 提取 database_id (简化版本，手动提示用户)
-    echo.
-    echo ℹ️  请从下方输出中复制 database_id:
-    type db_output.txt | findstr /C:"database_id"
-    echo.
-    set /p DATABASE_ID="请输入 database_id: "
-
-    if exist wrangler.toml (
-        echo ℹ️  正在更新配置文件...
-        powershell -Command "(Get-Content wrangler.toml) -replace 'database_id = \".*\"', 'database_id = \"%DATABASE_ID%\"' | Set-Content wrangler.toml"
-        echo ✅ 配置文件已更新
-    ) else (
-        echo ⚠️  未找到 wrangler.toml 文件
-    )
-) else (
-    findstr /C:"already exists" db_output.txt >nul
-    if %errorlevel% equ 0 (
-        echo ⚠️  数据库已存在，跳过创建
-    ) else (
-        echo ❌ 创建数据库失败
-        type db_output.txt
-        del db_output.txt
-        pause
-        exit /b 1
-    )
-)
-del db_output.txt
-
-:: 步骤 5: 初始化数据库
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 5/6: 初始化数据库
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-if exist src\db\schema.sql (
-    echo ℹ️  正在执行数据库迁移...
-    call wrangler d1 execute lx-music-api-db --remote --file=./src/db/schema.sql
-    if %errorlevel% neq 0 (
-        echo ⚠️  数据库迁移可能失败（如果数据库已初始化过，可忽略）
-    )
-    echo ✅ 数据库初始化完成
-) else (
-    echo ❌ 未找到数据库迁移文件
-    pause
-    exit /b 1
-)
-
-:: 步骤 6: 安装依赖并部署
-echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo 步骤 6/6: 部署到 Cloudflare Workers
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo.
-
-echo ℹ️  正在安装项目依赖...
-call npm install
-if %errorlevel% neq 0 (
-    echo ❌ 依赖安装失败
-    pause
-    exit /b 1
-)
-echo ✅ 依赖安装完成
-
-echo ℹ️  正在部署到 Cloudflare Workers...
-call npm run deploy > deploy_output.txt 2>&1
-
-findstr /C:"https://" deploy_output.txt | findstr /C:"workers.dev" >nul
-if %errorlevel% equ 0 (
-    echo ✅ 部署成功！
-
-    echo.
-    echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    echo 🎉 部署完成！
-    echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    echo.
-    echo 你的音乐 API 服务已成功部署！
-    echo.
-    echo 📍 请从下方输出中查看你的部署地址：
-    type deploy_output.txt | findstr /C:"https://" | findstr /C:"workers.dev"
-    echo.
-    echo 🔐 默认管理员账号：
-    echo    用户名: admin
-    echo    密码: admin123
-    echo.
-    echo ⚠️  重要提示：
-    echo    1. 请立即登录管理后台修改默认密码
-    echo    2. 在配置管理中填入各音源的 Cookie
-    echo    3. 创建 API 用户并获取 API Key
-    echo.
-    echo ✅ 部署完成！
-) else (
-    echo ❌ 部署失败
-    type deploy_output.txt
-    del deploy_output.txt
-    pause
-    exit /b 1
-)
-
-del deploy_output.txt
-echo.
-pause
+:find_db
+set DB_ID=
+for /f "tokens=*" %%i in ('npx --no-install wrangler d1 list --json 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const db=JSON.parse(s).find(x=>x.name===process.argv[1]);console.log(db?db.uuid:'')}catch{console.log('')}})" %DB_NAME%') do set DB_ID=%%i
+exit /b 0

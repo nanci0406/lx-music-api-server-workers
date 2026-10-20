@@ -1,120 +1,112 @@
-import CryptoJS from 'crypto-js';
+// 通用小工具
 
-// ==================== 哈希函数 ====================
-
-export function md5(text: string): string {
-  return CryptoJS.MD5(text).toString();
+export function now(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
-export function sha256(text: string): string {
-  return CryptoJS.SHA256(text).toString();
-}
-
-// ==================== Base64 编解码 ====================
-
-export function base64Encode(text: string): string {
-  return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(text));
-}
-
-export function base64Decode(encoded: string): string {
-  return CryptoJS.enc.Base64.parse(encoded).toString(CryptoJS.enc.Utf8);
-}
-
-// ==================== 十六进制编解码 ====================
-
-export function hexEncode(text: string): string {
-  return CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(text));
-}
-
-export function hexDecode(hex: string): string {
-  return CryptoJS.enc.Hex.parse(hex).toString(CryptoJS.enc.Utf8);
-}
-
-// ==================== AES 加密 ====================
-
-export function aesEncrypt(text: string, key: string, iv?: string, mode: 'CBC' | 'ECB' = 'CBC'): string {
-  const keyBytes = CryptoJS.enc.Utf8.parse(key);
-  const textBytes = CryptoJS.enc.Utf8.parse(text);
-
-  const options: any = { mode: mode === 'ECB' ? CryptoJS.mode.ECB : CryptoJS.mode.CBC };
-
-  if (iv && mode === 'CBC') {
-    options.iv = CryptoJS.enc.Utf8.parse(iv);
+/** 文件大小格式化，与 Python 版的 sizeFormat 输出一致(如 3.0MB、4.25MB) */
+export function sizeFormat(size: number): string {
+  size = Number(size) || 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  if (size < 1024) return `${size}B`;
+  let index = 0;
+  let value = size;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index++;
   }
-
-  const encrypted = CryptoJS.AES.encrypt(textBytes, keyBytes, options);
-  return encrypted.toString();
+  const rounded = Math.round(value * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(1) : rounded}${units[index]}`;
 }
 
-export function aesDecrypt(ciphertext: string, key: string, iv?: string, mode: 'CBC' | 'ECB' = 'CBC'): string {
-  const keyBytes = CryptoJS.enc.Utf8.parse(key);
+/** 时长格式化：mm:ss，超过一小时为 hh:mm:ss */
+export function timeLengthFormat(seconds: number | string): string {
+  const t = Math.trunc(Number(seconds));
+  if (!Number.isFinite(t)) return '//';
+  const hour = Math.floor(t / 3600);
+  const minute = Math.floor((t % 3600) / 60);
+  const second = t % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${hour > 0 ? pad(hour) + ':' : ''}${pad(minute)}:${pad(second)}`;
+}
 
-  const options: any = { mode: mode === 'ECB' ? CryptoJS.mode.ECB : CryptoJS.mode.CBC };
+/** 按时区偏移(小时)格式化时间戳：YYYY-MM-DD HH:MM:SS */
+export function timestampFormat(ts: number, offsetHours = 8): string {
+  const d = new Date((ts + offsetHours * 3600) * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
 
-  if (iv && mode === 'CBC') {
-    options.iv = CryptoJS.enc.Utf8.parse(iv);
+/** 按 key 排序后的新对象 */
+export function sortObject<T extends Record<string, unknown>>(obj: T): T {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj).sort()) sorted[key] = obj[key];
+  return sorted as T;
+}
+
+/** 拼接 k=v&k=v，不做编码(签名接口要求按原样拼接) */
+export function joinParams(params: Record<string, unknown>): string {
+  return Object.entries(params).map(([k, v]) => `${k}=${v}`).join('&');
+}
+
+/** 拼接并编码查询字符串 */
+export function buildQuery(params: Record<string, unknown>): string {
+  return Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+}
+
+export function isPlainObject(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function deepClone<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+/** 深度合并：对象逐层合并，数组和其他值整体替换 */
+export function deepMerge(base: any, override: any): any {
+  if (!isPlainObject(base) || !isPlainObject(override)) {
+    return override === undefined ? deepClone(base) : deepClone(override);
   }
-
-  const decrypted = CryptoJS.AES.decrypt(ciphertext, keyBytes, options);
-  return decrypted.toString(CryptoJS.enc.Utf8);
-}
-
-// ==================== URL 编码 ====================
-
-export function encodeURIComponentCustom(str: string): string {
-  return globalThis.encodeURIComponent(str)
-    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
-}
-
-export function decodeURIComponentCustom(str: string): string {
-  return globalThis.decodeURIComponent(str);
-}
-
-// ==================== 工具函数 ====================
-
-export function formatSize(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let size = bytes;
-  let unitIndex = 0;
-
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex++;
+  const result: Record<string, any> = deepClone(base);
+  for (const [key, value] of Object.entries(override)) {
+    result[key] = key in result ? deepMerge(result[key], value) : deepClone(value);
   }
-
-  return `${size.toFixed(2)} ${units[unitIndex]}`;
+  return result;
 }
 
-export function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-
-  if (h > 0) {
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+/** 按点号分隔的路径读取对象里的值，不存在时返回 undefined */
+export function getPath(obj: any, path: string): any {
+  let current = obj;
+  for (const key of path.split('.')) {
+    if (!isPlainObject(current) && !Array.isArray(current)) return undefined;
+    current = (current as any)[key];
+    if (current === undefined) return undefined;
   }
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return current;
 }
 
-export function sortObject<T extends Record<string, any>>(obj: T): T {
-  const sorted: any = {};
-  Object.keys(obj).sort().forEach(key => {
-    sorted[key] = obj[key];
-  });
-  return sorted;
+/** 按点号分隔的路径写入对象，缺少的中间层自动创建 */
+export function setPath(obj: any, path: string, value: unknown): void {
+  const keys = path.split('.');
+  let current = obj;
+  for (const key of keys.slice(0, -1)) {
+    if (!isPlainObject(current[key]) && !Array.isArray(current[key])) current[key] = {};
+    current = current[key];
+  }
+  current[keys[keys.length - 1]] = value;
 }
 
-// ==================== API Key 生成 ====================
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name;
+  return String(error);
+}
 
-export function generateApiKey(): string {
-  // 生成随机的 32 字符 API Key
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const randomBytes = CryptoJS.lib.WordArray.random(24);
-  const randomString = randomBytes.toString(CryptoJS.enc.Base64)
-    .replace(/\+/g, '')
-    .replace(/\//g, '')
-    .replace(/=/g, '')
-    .substring(0, 32);
-  
-  return randomString;
+/** 随机打乱后取一个 */
+export function pickRandom<T>(items: T[]): T | undefined {
+  if (!items.length) return undefined;
+  return items[Math.floor(Math.random() * items.length)];
 }

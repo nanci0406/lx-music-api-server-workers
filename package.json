@@ -1,26 +1,43 @@
 {
   "name": "lx-music-api-server-workers",
-  "version": "1.0.0",
-  "description": "lx-music API server for Cloudflare Workers",
-  "main": "src/index.ts",
+  "version": "2.0.0",
+  "private": true,
+  "description": "LX Music 自定义音源解析服务 · Cloudflare Workers 版",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev --ip 0.0.0.0",
     "deploy": "wrangler deploy",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
+    "db:init": "wrangler d1 execute lx-music-api-db --remote --file=./src/db/schema.sql",
+    "db:init:local": "wrangler d1 execute lx-music-api-db --local --file=./src/db/schema.sql",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "hono": "^4.3.0",
-    "crypto-js": "^4.2.0"
+    "crypto-js": "^4.2.0",
+    "fflate": "^0.8.3",
+    "hono": "^4.13.13",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240208.0",
-    "@types/crypto-js": "^4.2.0",
-    "wrangler": "^3.28.0",
-    "typescript": "^5.3.3",
-    "vitest": "^1.2.0",
-    "@vitest/ui": "^1.2.0",
-    "miniflare": "^3.20240129.0"
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "@types/crypto-js": "^4.2.2",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.151.2"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "D1 数据库，保存配置、用户、解析记录和缓存。表结构会在第一次访问时自动创建，不需要手动初始化。"
+      },
+      "ADMIN_PASSWORD": {
+        "description": "管理后台的登录密码，**至少 8 位**，用户名为 `admin`。可以用 `openssl rand -base64 18` 生成一个随机密码。部署后打开 `/admin` 登录。"
+      },
+      "ADMIN_USERNAME": {
+        "description": "管理后台的用户名，默认 `admin`。"
+      }
+    }
   }
 }

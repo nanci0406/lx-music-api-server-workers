@@ -1,216 +1,93 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# LX Music API Server (Workers) - 一键部署脚本(Linux / macOS)
+#
+# 会依次完成：安装依赖 → 登录 Cloudflare → 创建 D1 数据库 → 初始化表结构 → 部署 → 设置管理员密码
+# 可以重复执行：已有的数据库会直接使用，升级时再运行一次即可。
 
-# LX Music API Server - 一键部署脚本
-# 适用于 Linux/macOS
+set -euo pipefail
+cd "$(dirname "$0")"
 
-set -e
+DB_NAME="lx-music-api-db"
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+step() { echo; echo -e "${CYAN}━━ $1${NC}"; }
+ok() { echo -e "${GREEN}✔ $1${NC}"; }
+warn() { echo -e "${YELLOW}! $1${NC}"; }
+fail() { echo -e "${RED}✘ $1${NC}"; exit 1; }
 
-# 打印函数
-print_header() {
-    echo ""
-    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}$1${NC}"
-    echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+wrangler() { npx --no-install wrangler "$@"; }
+
+step "1/6 检查环境"
+command -v node >/dev/null || fail "没有找到 Node.js，请先安装 Node.js 20 或更高版本：https://nodejs.org/"
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+[ "$NODE_MAJOR" -ge 20 ] || fail "Node.js 版本太低($(node -v))，需要 20 或更高版本"
+ok "Node.js $(node -v)"
+
+step "2/6 安装依赖"
+npm install --no-audit --no-fund
+ok "依赖安装完成(wrangler $(wrangler --version 2>/dev/null | head -1))"
+
+step "3/6 登录 Cloudflare"
+if ! wrangler whoami --json >/dev/null 2>&1; then
+  echo "即将打开浏览器登录 Cloudflare……"
+  wrangler login
+fi
+# 登录的用户有多个账号时选一个(只对这次运行生效；也可以提前设置环境变量 CLOUDFLARE_ACCOUNT_ID)
+ACCOUNTS_JSON=$(wrangler whoami --json)
+ACCOUNT_COUNT=$(node -e 'console.log((JSON.parse(process.argv[1]).accounts||[]).length)' "$ACCOUNTS_JSON" 2>/dev/null || echo 0)
+if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ "$ACCOUNT_COUNT" -gt 1 ]; then
+  echo "这个用户有多个 Cloudflare 账号："
+  node -e 'JSON.parse(process.argv[1]).accounts.forEach((a,i)=>console.log(`  ${i+1}. ${a.name} (${a.id})`))' "$ACCOUNTS_JSON"
+  read -rp "选择要部署到的账号 [1]: " CHOICE
+  export CLOUDFLARE_ACCOUNT_ID=$(node -e 'console.log(JSON.parse(process.argv[1]).accounts[Number(process.argv[2])-1].id)' "$ACCOUNTS_JSON" "${CHOICE:-1}")
+fi
+ok "已登录${CLOUDFLARE_ACCOUNT_ID:+(账号 $CLOUDFLARE_ACCOUNT_ID)}"
+
+step "4/6 准备 D1 数据库"
+find_db() {
+  wrangler d1 list --json 2>/dev/null | node -e '
+    let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+      try{const db=JSON.parse(s).find(x=>x.name===process.argv[1]);console.log(db?db.uuid:"")}catch{console.log("")}
+    })' "$DB_NAME"
 }
+DB_ID=$(find_db)
+if [ -z "$DB_ID" ]; then
+  echo "创建数据库 $DB_NAME(主节点放在亚太地区，离国内更近)……"
+  wrangler d1 create "$DB_NAME" --location apac >/dev/null
+  DB_ID=$(find_db)
+  [ -n "$DB_ID" ] || fail "创建数据库失败，请执行 npx wrangler d1 create $DB_NAME 查看原因"
+  ok "数据库已创建"
+else
+  ok "使用已有的数据库"
+fi
+sed -i.bak "s/^database_id *= *\".*\"/database_id = \"$DB_ID\"/" wrangler.toml && rm -f wrangler.toml.bak
+ok "database_id = $DB_ID"
 
-print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
+step "5/6 初始化表结构"
+# Worker 第一次处理请求时也会自动建表，这里提前执行一次，可以尽早发现配置问题
+wrangler d1 execute "$DB_NAME" --remote --file=./src/db/schema.sql >/dev/null
+ok "表结构已就绪"
 
-print_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
+step "6/6 部署"
+DEPLOY_OUTPUT=$(wrangler deploy 2>&1) || { echo "$DEPLOY_OUTPUT"; fail "部署失败"; }
+echo "$DEPLOY_OUTPUT" | tail -5
+URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' <<<"$DEPLOY_OUTPUT" | head -1 || true)
+ok "部署完成"
 
-print_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
+echo
+echo "设置管理员密码：直接回车跳过，稍后在浏览器里打开管理后台创建管理员"
+read -rsp "管理员密码(至少 8 位): " ADMIN_PASSWORD; echo
+if [ -n "$ADMIN_PASSWORD" ]; then
+  [ ${#ADMIN_PASSWORD} -ge 8 ] || fail "密码至少需要 8 位，请重新运行脚本"
+  printf '%s' "$ADMIN_PASSWORD" | wrangler secret put ADMIN_PASSWORD >/dev/null
+  ok "已设置(用户名 admin，只在还没有管理员时生效)"
+fi
 
-print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
-}
-
-# 检查命令是否存在
-check_command() {
-    if ! command -v $1 &> /dev/null; then
-        return 1
-    fi
-    return 0
-}
-
-# 主函数
-main() {
-    clear
-    print_header "🚀 LX Music API Server - 一键部署脚本"
-
-    echo -e "${CYAN}欢迎使用 LX Music API Server 自动部署工具！${NC}"
-    echo ""
-    echo "本脚本将帮助你完成以下操作："
-    echo "  1. 检查环境依赖"
-    echo "  2. 安装必要工具"
-    echo "  3. 登录 Cloudflare"
-    echo "  4. 创建 D1 数据库"
-    echo "  5. 初始化数据库"
-    echo "  6. 部署到 Cloudflare Workers"
-    echo ""
-    read -p "按 Enter 键开始部署，或按 Ctrl+C 取消... "
-
-    # 步骤 1: 检查环境
-    print_header "步骤 1/6: 检查环境依赖"
-
-    print_info "检查 Node.js..."
-    if check_command node; then
-        NODE_VERSION=$(node -v)
-        print_success "Node.js 已安装: $NODE_VERSION"
-    else
-        print_error "Node.js 未安装"
-        print_info "请先安装 Node.js 18 或更高版本: https://nodejs.org/"
-        exit 1
-    fi
-
-    print_info "检查 npm..."
-    if check_command npm; then
-        NPM_VERSION=$(npm -v)
-        print_success "npm 已安装: $NPM_VERSION"
-    else
-        print_error "npm 未安装"
-        exit 1
-    fi
-
-    # 步骤 2: 安装 Wrangler
-    print_header "步骤 2/6: 安装 Wrangler CLI"
-
-    if check_command wrangler; then
-        WRANGLER_VERSION=$(wrangler --version)
-        print_success "Wrangler 已安装: $WRANGLER_VERSION"
-    else
-        print_info "正在安装 Wrangler..."
-        npm install -g wrangler
-        print_success "Wrangler 安装完成"
-    fi
-
-    # 步骤 3: 登录 Cloudflare
-    print_header "步骤 3/6: 登录 Cloudflare"
-
-    print_info "即将打开浏览器进行 Cloudflare 登录..."
-    print_warning "如果已经登录，可以跳过此步骤"
-    read -p "按 Enter 键继续登录... "
-
-    wrangler login || {
-        print_error "登录失败，请检查网络连接"
-        exit 1
-    }
-    print_success "登录成功"
-
-    # 步骤 4: 创建 D1 数据库
-    print_header "步骤 4/6: 创建 D1 数据库"
-
-    print_info "正在创建数据库..."
-    DB_OUTPUT=$(wrangler d1 create lx-music-api-db 2>&1)
-
-    if echo "$DB_OUTPUT" | grep -q "database_id"; then
-        print_success "数据库创建成功"
-
-        # 提取 database_id
-        DATABASE_ID=$(echo "$DB_OUTPUT" | grep "database_id" | awk -F'"' '{print $2}')
-        print_info "数据库 ID: $DATABASE_ID"
-
-        # 更新 wrangler.toml
-        print_info "正在更新配置文件..."
-        if [ -f "wrangler.toml" ]; then
-            # 备份原文件
-            cp wrangler.toml wrangler.toml.bak
-
-            # 替换 database_id
-            sed -i.tmp "s/database_id = \".*\"/database_id = \"$DATABASE_ID\"/" wrangler.toml
-            rm -f wrangler.toml.tmp
-
-            print_success "配置文件已更新"
-        else
-            print_warning "未找到 wrangler.toml 文件"
-        fi
-    else
-        # 数据库可能已存在
-        if echo "$DB_OUTPUT" | grep -q "already exists"; then
-            print_warning "数据库已存在，跳过创建"
-        else
-            print_error "创建数据库失败"
-            echo "$DB_OUTPUT"
-            exit 1
-        fi
-    fi
-
-    # 步骤 5: 初始化数据库
-    print_header "步骤 5/6: 初始化数据库"
-
-    if [ -f "src/db/schema.sql" ]; then
-        print_info "正在执行数据库迁移..."
-        wrangler d1 execute lx-music-api-db --remote --file=./src/db/schema.sql || {
-            print_warning "数据库迁移可能失败（如果数据库已初始化过，可忽略）"
-        }
-        print_success "数据库初始化完成"
-    else
-        print_error "未找到数据库迁移文件"
-        exit 1
-    fi
-
-    # 步骤 6: 安装依赖并部署
-    print_header "步骤 6/6: 部署到 Cloudflare Workers"
-
-    print_info "正在安装项目依赖..."
-    npm install || {
-        print_error "依赖安装失败"
-        exit 1
-    }
-    print_success "依赖安装完成"
-
-    print_info "正在部署到 Cloudflare Workers..."
-    DEPLOY_OUTPUT=$(npm run deploy 2>&1)
-
-    if echo "$DEPLOY_OUTPUT" | grep -q "https://"; then
-        print_success "部署成功！"
-
-        # 提取部署地址
-        WORKER_URL=$(echo "$DEPLOY_OUTPUT" | grep -o "https://[^[:space:]]*workers.dev" | head -1)
-
-        echo ""
-        print_header "🎉 部署完成！"
-
-        echo -e "${GREEN}你的音乐 API 服务已成功部署！${NC}"
-        echo ""
-        echo -e "${CYAN}📍 访问地址：${NC}"
-        echo -e "   🏠 项目首页: ${BLUE}$WORKER_URL/${NC}"
-        echo -e "   🎛️  管理后台: ${BLUE}$WORKER_URL/admin${NC}"
-        echo -e "   📦 音源脚本: ${BLUE}$WORKER_URL/script?key=你的KEY${NC}"
-        echo ""
-        echo -e "${CYAN}🔐 默认管理员账号：${NC}"
-        echo -e "   用户名: ${YELLOW}admin${NC}"
-        echo -e "   密码: ${YELLOW}admin123${NC}"
-        echo ""
-        echo -e "${RED}⚠️  重要提示：${NC}"
-        echo -e "   1. 请立即登录管理后台修改默认密码"
-        echo -e "   2. 在配置管理中填入各音源的 Cookie"
-        echo -e "   3. 创建 API 用户并获取 API Key"
-        echo ""
-        print_success "部署完成！"
-    else
-        print_error "部署失败"
-        echo "$DEPLOY_OUTPUT"
-        exit 1
-    fi
-}
-
-# 错误处理
-trap 'print_error "脚本执行出错，请检查错误信息"; exit 1' ERR
-
-# 运行主函数
-main
+echo
+echo -e "${GREEN}全部完成！${NC}"
+if [ -n "$URL" ]; then
+  echo "  首页      $URL/"
+  echo "  管理后台  $URL/admin"
+  echo "  音源脚本  $URL/script?key=<用户的 Key>"
+fi
+[ -n "${ADMIN_PASSWORD:-}" ] || warn "请尽快打开管理后台创建管理员账号，在此之前任何人打开后台都可以创建"

@@ -1,31 +1,6 @@
-# 本地开发环境变量示例
-# 复制此文件为 .dev.vars 并填入真实配置
+# 需要设置的 Secret。“一键部署到 Cloudflare”时会提示填写这里列出的值；
+# 本地开发(npm run dev)时复制为 .dev.vars 后修改。
+# 平台账号、用户等其他配置都在管理后台里设置，保存在 D1 数据库中。
 
-# 基础配置
-AUTH_ENABLED=false
-ENVIRONMENT=development
-
-# 管理员账号
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-
-# 网易云音乐
-WY_COOKIE=你的网易云Cookie
-
-# 酷狗音乐
-KG_TOKEN=你的酷狗Token
-KG_USERID=你的酷狗UserID
-KG_MID=你的酷狗MID
-
-# QQ音乐
-TX_UIN=你的QQ音乐UIN
-TX_KEY=你的QQ音乐Key
-
-# 咪咕音乐
-MG_BY=你的咪咕BY
-MG_SESSION=你的咪咕Session
-
-# 酷我音乐
-KW_UID=你的酷我UID
-KW_TOKEN=你的酷我Token
-KW_DEVICE_ID=你的酷我设备ID
+# 管理后台的登录密码(用户名默认 admin，见 wrangler.toml 的 ADMIN_USERNAME)，至少 8 位
+ADMIN_PASSWORD=change-me-please
