@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # LX Music API Server (Workers) - 一键部署脚本(Linux / macOS)
 #
-# 会依次完成：安装依赖 → 登录 Cloudflare → 创建 D1 数据库 → 初始化表结构 → 部署 → 设置管理员密码
+# 会依次完成：安装依赖 → 登录 Cloudflare → 创建 D1 数据库 → 部署 → 设置管理员密码
 # 可以重复执行：已有的数据库会直接使用，升级时再运行一次即可。
 
 set -euo pipefail
@@ -17,17 +17,17 @@ fail() { echo -e "${RED}✘ $1${NC}"; exit 1; }
 
 wrangler() { npx --no-install wrangler "$@"; }
 
-step "1/6 检查环境"
+step "1/5 检查环境"
 command -v node >/dev/null || fail "没有找到 Node.js，请先安装 Node.js 20 或更高版本：https://nodejs.org/"
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 [ "$NODE_MAJOR" -ge 20 ] || fail "Node.js 版本太低($(node -v))，需要 20 或更高版本"
 ok "Node.js $(node -v)"
 
-step "2/6 安装依赖"
+step "2/5 安装依赖"
 npm install --no-audit --no-fund
 ok "依赖安装完成(wrangler $(wrangler --version 2>/dev/null | head -1))"
 
-step "3/6 登录 Cloudflare"
+step "3/5 登录 Cloudflare"
 if ! wrangler whoami --json >/dev/null 2>&1; then
   echo "即将打开浏览器登录 Cloudflare……"
   wrangler login
@@ -43,7 +43,8 @@ if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ "$ACCOUNT_COUNT" -gt 1 ]; then
 fi
 ok "已登录${CLOUDFLARE_ACCOUNT_ID:+(账号 $CLOUDFLARE_ACCOUNT_ID)}"
 
-step "4/6 准备 D1 数据库"
+step "4/5 准备 D1 数据库"
+# 部署时 wrangler 会按名字使用这个数据库；这里提前创建，是为了把主节点放在离国内更近的亚太地区
 find_db() {
   wrangler d1 list --json 2>/dev/null | node -e '
     let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
@@ -58,17 +59,10 @@ if [ -z "$DB_ID" ]; then
   [ -n "$DB_ID" ] || fail "创建数据库失败，请执行 npx wrangler d1 create $DB_NAME 查看原因"
   ok "数据库已创建"
 else
-  ok "使用已有的数据库"
+  ok "使用已有的数据库($DB_ID)"
 fi
-sed -i.bak "s/^database_id *= *\".*\"/database_id = \"$DB_ID\"/" wrangler.toml && rm -f wrangler.toml.bak
-ok "database_id = $DB_ID"
 
-step "5/6 初始化表结构"
-# Worker 第一次处理请求时也会自动建表，这里提前执行一次，可以尽早发现配置问题
-wrangler d1 execute "$DB_NAME" --remote --file=./src/db/schema.sql >/dev/null
-ok "表结构已就绪"
-
-step "6/6 部署"
+step "5/5 部署(表结构会在第一次访问时自动创建)"
 DEPLOY_OUTPUT=$(wrangler deploy 2>&1) || { echo "$DEPLOY_OUTPUT"; fail "部署失败"; }
 echo "$DEPLOY_OUTPUT" | tail -5
 URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' <<<"$DEPLOY_OUTPUT" | head -1 || true)

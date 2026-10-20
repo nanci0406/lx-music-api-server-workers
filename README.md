@@ -237,7 +237,7 @@ cd lx-music-api-server-workers
 ./deploy.sh        # Windows 运行 deploy.bat
 ```
 
-脚本会安装依赖、登录 Cloudflare、创建 D1 数据库(放在亚太地区)、初始化表结构并部署，最后询问管理员密码。升级时拉取新代码后再运行一次即可。
+脚本会安装依赖、登录 Cloudflare、创建 D1 数据库(放在亚太地区)并部署，最后询问管理员密码。升级时拉取新代码后再运行一次即可。
 
 ### 手动部署
 
@@ -245,7 +245,7 @@ cd lx-music-api-server-workers
 npm install
 npx wrangler login
 
-# 创建数据库，把输出的 database_id 填到 wrangler.toml
+# 创建数据库(可选：不创建的话部署时会自动新建，这里是为了把主节点放在亚太地区)
 npx wrangler d1 create lx-music-api-db --location apac
 
 # 设置管理员密码(用户名默认 admin，见 wrangler.toml 的 ADMIN_USERNAME)
@@ -255,6 +255,8 @@ npm run deploy
 ```
 
 Cloudflare 账号下有多个账户时，设置环境变量 `CLOUDFLARE_ACCOUNT_ID` 指定部署到哪一个。
+
+`wrangler.toml` 里没有写 `database_id`：部署时会沿用 Worker 已经绑定的数据库，没有的话使用名为 `lx-music-api-db` 的数据库，再没有就自动新建。想固定使用某个数据库，可以自己加上 `database_id`。
 
 ### 管理员账号
 

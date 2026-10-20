@@ -15,12 +15,12 @@ type = "Text"
 globs = ["**/*.txt", "**/*.sql"]
 fallthrough = true
 
-# D1 数据库：配置、用户、解析记录、定时任务状态、缓存都保存在这里。
-# 表结构会在第一次请求时自动创建/升级。通过“一键部署”按钮部署时会自动新建数据库并替换这里的 database_id
+# D1 数据库：配置、用户、解析记录、定时任务状态、缓存都保存在这里，表结构会在第一次请求时自动创建/升级。
+# 不写 database_id：部署时 wrangler 会沿用 Worker 已经绑定的数据库，没有的话使用账号里名为 lx-music-api-db 的数据库，
+# 再没有就自动新建一个(一键部署、Workers Builds 自动部署都适用)。也可以填上自己的 database_id 固定使用某个数据库
 [[d1_databases]]
 binding = "DB"
 database_name = "lx-music-api-db"
-database_id = "482d7557-dca5-41f9-9277-1e3533f7ebd5"
 
 # 每分钟触发一次：执行到期的刷新登录、签到、清理任务(各任务按自己的间隔执行，失败后退避重试)，
 # 每 5 分钟检查一次各平台状态
