@@ -142,7 +142,7 @@ describe('酷狗客户端参数', () => {
     });
     h().fetch.on(KG_INFO, json({ data: [[{ audio_info: { hash_128: 'H' } }]] }));
     h().fetch.on('https://gateway.kugou.com/v5/url', json({ status: 1, url: ['http://kg/lite.mp3'] }));
-    h().fetch.on('http://kg.test/login', json({ error_code: 0, data: { userid: 42, token: 'T2' } }));
+    h().fetch.on('http://kg.test/login', json({ status: 1, data: { userid: 42, token: 'T2' } }));
     const ctx = await h().context();
     const { url } = await import('../src/sources/kg/player');
     await url(ctx, 'h', '128k');
@@ -169,7 +169,7 @@ describe('酷狗客户端参数', () => {
     await h().writeConfig({ 'module.kg.user': { token: 'T', userid: '1', refresh_login: { enable: true, login_url: 'http://kg.test/login' } } });
     h().fetch.on('http://kg.test/login', json({ error_code: 20017, data: null }));
     const { refresh } = await import('../src/sources/kg/refresh-login');
-    await expect(refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20017；appid 1005，签名 key OIlwie…，接口 kg.test)：token 无效或已过期');
+    await expect(refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20017；appid 1005，签名 key OIlwie…，接口 kg.test/login)：token 无效或已过期');
   });
 });
 

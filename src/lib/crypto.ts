@@ -132,6 +132,26 @@ export function aesCbcEncrypt(data: string | Uint8Array, key: string | Uint8Arra
   return wordArrayToBytes(encrypted.ciphertext);
 }
 
+/** AES-CBC(PKCS7) 解密 */
+export function aesCbcDecrypt(data: Uint8Array, key: string | Uint8Array, iv: string | Uint8Array): Uint8Array {
+  const decrypted = CryptoJS.AES.decrypt(
+    CryptoJS.lib.CipherParams.create({ ciphertext: bytesToWordArray(data) }),
+    toWordArray(key),
+    { iv: toWordArray(iv), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 },
+  );
+  return wordArrayToBytes(decrypted);
+}
+
+/** RSA 无填充加密(明文在后面补 0 到密钥长度)，返回十六进制 */
+export function rsaRawEncryptHex(message: Uint8Array, modulusHex: string, exponentHex: string): string {
+  const modulus = BigInt('0x' + modulusHex);
+  const size = Math.ceil(modulus.toString(16).length / 2);
+  if (message.length > size) throw new Error('RSA 明文太长');
+  const padded = new Uint8Array(size);
+  padded.set(message);
+  return modPow(BigInt('0x' + bytesToHex(padded)), BigInt('0x' + exponentHex), modulus).toString(16).padStart(size * 2, '0');
+}
+
 /** AES-ECB(PKCS7) 解密 */
 export function aesEcbDecrypt(data: Uint8Array, key: string | Uint8Array): Uint8Array {
   const decrypted = CryptoJS.AES.decrypt(

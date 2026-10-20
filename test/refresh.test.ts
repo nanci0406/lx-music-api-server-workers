@@ -153,36 +153,50 @@ describe('网易云刷新登录', () => {
 });
 
 describe('酷狗刷新登录', () => {
-  it('成功后写回新的 userid 和 token；签名覆盖实际发送的请求体', async () => {
+  it('成功后写回新的 userid 和 token；旧的 v4 接口改用 v5；签名覆盖实际发送的请求体', async () => {
     await h().writeConfig({ 'module.kg.user': { token: 'OLD', userid: '42', mid: 'm1', refresh_login: { enable: true, login_url: 'http://login.user.kugou.com/v4/login_by_token' } } });
-    h().fetch.on('http://login.user.kugou.com/v4/login_by_token', json({ error_code: 0, data: { userid: 43, token: 'NEW' } }));
+    h().fetch.on('http://login.user.kugou.com/v5/login_by_token', json({ status: 1, error_code: 0, data: { userid: 43, token: 'NEW' } }));
     await kgRefresh.refresh(await h().context());
     expect((await h().config()).get('module.kg.user')).toMatchObject({ userid: '43', token: 'NEW' });
     const call = h().fetch.calls[0];
     const url = new URL(call.url);
     expect(url.searchParams.get('appid')).toBe('1005');
+    expect(url.searchParams.get('token')).toBe('OLD');
     const body = JSON.parse(call.body);
-    expect(body).toMatchObject({ userid: '42', t1: 0, t2: 0 });
+    expect(body).toMatchObject({ userid: '42', t1: 0, t2: 0, plat: 1, t3: 'MCwwLDAsMCwwLDAsMCwwLDA=' });
     expect(body.p3).toMatch(/^[0-9a-f]+$/);
+    expect(body.pk).toMatch(/^[0-9a-f]{256}$/);
+    expect(body.params).toMatch(/^[0-9a-f]+$/);
+    expect(body.dev).toBeUndefined();
     const { sign } = await import('../src/sources/kg/utils');
     const params = Object.fromEntries(url.searchParams);
     const { signature, ...rest } = params;
     expect(signature).toBe(sign(rest, call.body, 'OIlwieks28dk2k092lksi2UIkp'));
   });
 
-  it('概念版使用自己的 AES 参数；不支持的 appid 返回 false，接口失败时抛出带错误码的原因', async () => {
+  it('概念版使用自己的 AES 参数并带上设备信息；不支持的 appid 返回 false，接口失败时抛出带错误码的原因', async () => {
     await h().writeConfig({ 'module.kg.user': { token: 'T', userid: '1', mid: 'm', refresh_login: { enable: true, login_url: 'http://kg.test/login' } } });
-    h().fetch.on('http://kg.test/login', json({ error_code: 0, data: { userid: 1, token: 'T2' } }));
+    h().fetch.on('http://kg.test/login', json({ status: 1, data: { userid: 1, token: 'T2', t1: 'NEWT1' } }));
     await kgRefresh.refresh(await h().context());
     const normalP3 = JSON.parse(h().fetch.calls[0].body).p3;
     await h().writeConfig({ 'module.kg.client.appid': '3116', 'module.kg.user.token': 'T' });
     await kgRefresh.refresh(await h().context());
-    expect(JSON.parse(h().fetch.calls[1].body).p3).not.toBe(normalP3);
+    const lite = JSON.parse(h().fetch.calls[1].body);
+    expect(lite.p3).not.toBe(normalP3);
+    expect(lite.t1).toMatch(/^[0-9a-f]+$/);
+    expect(lite.t2).toMatch(/^[0-9a-f]+$/);
+    expect(lite.dev).toMatch(/^[0-9A-Z]{10}$/);
+    expect(new URL(h().fetch.calls[1].url).searchParams.get('clientver')).toBe('11440');
+    // 返回的 t1 会保存下来，设备信息保持不变
+    expect((await h().config()).get('module.kg.user.t1')).toBe('NEWT1');
+    await h().writeConfig({ 'module.kg.user.token': 'T' });
+    await kgRefresh.refresh(await h().context());
+    expect(JSON.parse(h().fetch.calls[2].body).dev).toBe(lite.dev);
     await h().writeConfig({ 'module.kg.client.appid': '1001' });
     expect(await kgRefresh.refresh(await h().context())).toBe(false);
     await h().writeConfig({ 'module.kg.client.appid': '1005' });
     h().fetch.routes = [];
-    h().fetch.on('http://kg.test/login', json({ error_code: 20018 }));
+    h().fetch.on('http://kg.test/login', json({ status: 0, error_code: 20018 }));
     await expect(kgRefresh.refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20018；appid 1005，签名 key OIlwie…');
   });
 });

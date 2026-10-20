@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG = {
         refresh_login: { // token 保活，30 天不刷新会失效；appid 为 3116 时需要同时更换 signatureKey
           enable: false,
           interval: 86000,
-          login_url: 'http://login.user.kugou.com/v4/login_by_token',
+          login_url: 'http://login.user.kugou.com/v5/login_by_token',
         },
       },
     },
@@ -151,7 +151,7 @@ export const DEFAULT_CONFIG = {
           token: '',
           mid: '114514',
           lite_sign_in: { enable: false, interval: 86400, mixsongmid: { value: 'auto' } },
-          refresh_login: { enable: false, interval: 86000, login_url: 'http://login.user.kugou.com/v4/login_by_token' },
+          refresh_login: { enable: false, interval: 86000, login_url: 'http://login.user.kugou.com/v5/login_by_token' },
         },
       ] as Record<string, any>[],
       tx: [
