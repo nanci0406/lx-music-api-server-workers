@@ -71,7 +71,7 @@ export function kgTools(ctx: AppContext): KgTools {
 
 // 酷狗接口常见的错误码
 const ERROR_HINTS: Record<string, string> = {
-  20006: '签名错误：客户端类型(appid)和签名参数不匹配，概念版账号请把 appid 设为 3116',
+  20006: '签名错误：token 和客户端类型(appid)不匹配。酷狗概念版 App 里得到的 token 要把 appid 设为 3116，酷狗音乐 App 的要设为 1005',
   20017: 'token 无效或已过期，请重新获取 token',
   20028: '酷狗要求验证这次请求，通常是伪装的国内 IP 不被认可，请在“配置 → 服务”里更换伪装国内 IP',
 };

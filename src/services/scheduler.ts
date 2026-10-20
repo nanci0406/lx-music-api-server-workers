@@ -227,6 +227,14 @@ export async function runNow(ctx: AppContext, name: string): Promise<'missing' |
   return { done: execute(ctx, task, failures) };
 }
 
+/**
+ * 配置改了之后，让正在退避等待重试的失败任务在下一次 Cron(1 分钟内)就按新配置重试，
+ * 不用等完退避间隔(失败多半就是配置引起的，改完配置马上就能看到结果)
+ */
+export async function retryFailedTasksSoon(db: D1Database): Promise<void> {
+  await db.prepare('UPDATE task_state SET next_run = 0 WHERE consecutive_failures > 0').run();
+}
+
 /** 后台展示用的任务名称 */
 export function taskLabel(name: string): string {
   const pooled = /^(.+)_pooled_(\d+)$/.exec(name);

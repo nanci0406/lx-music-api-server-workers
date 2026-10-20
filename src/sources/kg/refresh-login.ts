@@ -53,7 +53,9 @@ export async function requestRefresh(
   if (!result || result.error_code !== 0 || !result.data?.token) {
     const code = result ? result.error_code : `HTTP ${resp.status}`;
     const hint = errorHint(code);
-    throw new RefreshError(`酷狗音乐账号(UID_${userId})刷新登录失败(code: ${code})${hint ? '：' + hint : ''}`);
+    // 带上实际使用的 appid、签名 key(前 6 位，都是公开的固定值)和接口，方便判断是不是配置没有生效
+    const used = `appid ${appid}，签名 key ${tools.signkey.slice(0, 6)}…，接口 ${new URL(loginUrl).host}`;
+    throw new RefreshError(`酷狗音乐账号(UID_${userId})刷新登录失败(code: ${code}；${used})${hint ? '：' + hint : ''}`);
   }
   return result.data;
 }

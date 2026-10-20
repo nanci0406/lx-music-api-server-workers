@@ -102,3 +102,19 @@ describe('定时任务', () => {
     expect(taskLabel('something_else')).toBe('something_else');
   });
 });
+
+describe('改配置后重试', () => {
+  it('保存配置后，退避中的失败任务在下一次 Cron 就重试', async () => {
+    await h().loginAdmin();
+    await h().writeConfig({ 'module.wy.user.refresh_login.enable': true, 'module.wy.user.cookie': 'MUSIC_U=x' });
+    const later = Math.floor(Date.now() / 1000) + 7200;
+    h().db.sqlite.exec(`INSERT INTO task_state (name, latest_execute, next_run, consecutive_failures, last_error)
+      VALUES ('wy_refresh_login', ${later - 7300}, ${later}, 5, 'old error')`);
+    expect(await runDueTasks(await h().context())).not.toContain('wy_refresh_login');
+    await h().api('PUT', '/api/admin/config', { values: { 'module.wy.user.refresh_login.interval': 7200 } });
+    expect(state('wy_refresh_login').next_run).toBe(0);
+    h().fetch.on('https://interface.music.163.com/eapi/login/token/refresh', new Response('{"code":200}'));
+    expect(await runDueTasks(await h().context())).toContain('wy_refresh_login');
+    expect(state('wy_refresh_login').consecutive_failures).toBe(0);
+  });
+});

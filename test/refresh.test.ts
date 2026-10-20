@@ -183,6 +183,6 @@ describe('酷狗刷新登录', () => {
     await h().writeConfig({ 'module.kg.client.appid': '1005' });
     h().fetch.routes = [];
     h().fetch.on('http://kg.test/login', json({ error_code: 20018 }));
-    await expect(kgRefresh.refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20018)');
+    await expect(kgRefresh.refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20018；appid 1005，签名 key OIlwie…');
   });
 });

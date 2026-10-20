@@ -8,7 +8,7 @@ import { isPlainObject, now } from '../lib/utils';
 import * as adminAuth from '../services/admin-auth';
 import * as loginSession from '../services/login-session';
 import { getCachedModuleHealth, refreshIfStale, refreshModuleHealth } from '../services/module-health';
-import { getStatus, runNow, taskLabel } from '../services/scheduler';
+import { getStatus, retryFailedTasksSoon, runNow, taskLabel } from '../services/scheduler';
 import * as stats from '../services/stats';
 import * as users from '../services/users';
 import { SOURCE_NAMES } from '../sources/common';
@@ -188,6 +188,7 @@ app.put('/api/admin/config', async (c) => {
   if (Object.keys(errors).length) fail(400, '有配置项填写不正确', { errors });
   if (!Object.keys(updates).length) fail(400, '没有需要保存的修改');
   await c.get('ctx').config.writeBatch(updates);
+  await retryFailedTasksSoon(c.get('ctx').db);
   return ok(c, { ...configPayload(c), saved: Object.keys(updates), restart_required: [], reload_error: null });
 });
 
@@ -212,6 +213,7 @@ app.put('/api/admin/config/raw', async (c) => {
     fail(400, '配置必须包含 common、security、module 三个部分');
   }
   await c.get('ctx').config.replace(parsed as Record<string, any>);
+  await retryFailedTasksSoon(c.get('ctx').db);
   return ok(c, { content: c.get('ctx').config.text(), backup: 'config_backup' });
 });
 
@@ -474,6 +476,7 @@ app.post('/api/admin/music-login/:id/apply', async (c) => {
   const platformLogin = ls.platform === 'wy' ? wyLogin : qqLogin;
   try {
     const note = await platformLogin.applyCredential(ctx, ls, String(data.target ?? ''), Boolean(data.enable_refresh));
+    await retryFailedTasksSoon(ctx.db);
     return ok(c, { note, reload_error: null });
   } catch (e) {
     loginError(e);

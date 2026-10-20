@@ -169,7 +169,7 @@ describe('酷狗客户端参数', () => {
     await h().writeConfig({ 'module.kg.user': { token: 'T', userid: '1', refresh_login: { enable: true, login_url: 'http://kg.test/login' } } });
     h().fetch.on('http://kg.test/login', json({ error_code: 20017, data: null }));
     const { refresh } = await import('../src/sources/kg/refresh-login');
-    await expect(refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20017)：token 无效或已过期');
+    await expect(refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20017；appid 1005，签名 key OIlwie…，接口 kg.test)：token 无效或已过期');
   });
 });
 
