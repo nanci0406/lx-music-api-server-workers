@@ -2,21 +2,25 @@
 
 import type { AppContext } from '../../lib/context';
 import { log } from '../../lib/log';
-import { aesSign, signRequest } from './utils';
+import { aesSign, errorHint, kgTools, signRequest } from './utils';
 
 const logger = log('kg_refresh_login');
+
+// 刷新失败的原因会显示在后台“模块状态”的任务错误里
+class RefreshError extends Error {}
 
 // 概念版(appid=3116)使用的 aes 参数
 const LITE_AES = { key: 'c24f74ca2820225badc01946dba4fdf7', iv: 'adc01946dba4fdf7' };
 
 /**
  * 发起一次 token 保活请求
- * @returns 成功时返回响应里的 data(含新的 userid/token)；失败返回 null
+ * @returns 成功时返回响应里的 data(含新的 userid/token)；appid 不支持时返回 null；接口返回失败时抛出带原因的错误
  */
 export async function requestRefresh(
   ctx: AppContext, userId: string, token: string, mid: string, loginUrl: string,
 ): Promise<{ userid: string | number; token: string } | null> {
-  const appid = String(ctx.config.get('module.kg.client.appid'));
+  const tools = kgTools(ctx);
+  const appid = tools.appid;
   let aes: { key?: string; iv?: string } = {};
   if (appid === '3116') aes = LITE_AES;
   else if (appid !== '1005') {
@@ -31,7 +35,7 @@ export async function requestRefresh(
     dfid: '-',
     appid,
     mid,
-    clientver: String(ctx.config.get('module.kg.client.clientver')),
+    clientver: tools.clientver,
     clienttime,
   };
   const resp = await signRequest(ctx, loginUrl, params, {
@@ -44,11 +48,12 @@ export async function requestRefresh(
       'KG-RC': '1',
       'Content-Type': 'application/json',
     },
-  }, String(ctx.config.get('module.kg.client.signatureKey')));
+  }, tools.signkey);
   const result = resp.jsonOrNull();
   if (!result || result.error_code !== 0 || !result.data?.token) {
-    logger.warning(`酷狗音乐账号(UID_${userId})刷新登录失败, code: ${result ? result.error_code : `HTTP ${resp.status}`}`);
-    return null;
+    const code = result ? result.error_code : `HTTP ${resp.status}`;
+    const hint = errorHint(code);
+    throw new RefreshError(`酷狗音乐账号(UID_${userId})刷新登录失败(code: ${code})${hint ? '：' + hint : ''}`);
   }
   return result.data;
 }

@@ -5,7 +5,7 @@ import { FailedException } from '../../lib/errors';
 import { now, timestampFormat } from '../../lib/utils';
 import { pickAccount, type UrlResult } from '../common';
 import { getMusicInfo } from './musicInfo';
-import { getKey, kgTools, QUALITY_HASH_MAP, QUALITY_MAP, signRequest } from './utils';
+import { errorHint, getKey, kgTools, QUALITY_HASH_MAP, QUALITY_MAP, signRequest } from './utils';
 
 export async function url(ctx: AppContext, songId: string, quality: string): Promise<UrlResult> {
   songId = songId.toLowerCase();
@@ -59,9 +59,14 @@ export async function url(ctx: AppContext, songId: string, quality: string): Pro
   const resp = await signRequest(ctx, tools.url, params, { headers }, tools.signkey);
   const body = resp.jsonOrNull();
   if (!body) throw new FailedException(`链接获取失败，接口返回了无法识别的内容(HTTP ${resp.status})`);
+  const hint = errorHint(body.errcode ?? body.error_code);
+  if (hint) throw new FailedException(`链接获取失败(${body.errcode ?? body.error_code})：${hint}`);
   if (body.status === 3) throw new FailedException('该歌曲在酷狗没有版权，请换源播放');
   if (body.status === 2) throw new FailedException('链接获取失败，请检查账号是否有会员或数字专辑是否购买');
-  if (body.status !== 1) throw new FailedException('链接获取失败，可能是数字专辑或者api失效');
+  if (body.status !== 1) {
+    const detail = body.errcode ?? body.error_code;
+    throw new FailedException(`链接获取失败，可能是数字专辑或者api失效${detail ? `(${detail}${body.error || body.errmsg ? '，' + (body.error || body.errmsg) : ''})` : ''}`);
+  }
   const link = Array.isArray(body.url) ? body.url[0] : '';
   if (!link) throw new FailedException('链接获取失败，接口没有返回播放地址');
   return { url: link, quality };

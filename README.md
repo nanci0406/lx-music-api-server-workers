@@ -216,7 +216,7 @@ curl -H "X-Request-User: alice" \
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `common.cookiepool` | `false` | 账号池模式 |
-| `common.fakeip` | `1.0.1.114` | 请求音乐平台时附带的 `X-Forwarded-For`(Workers 从海外节点发出请求，部分接口需要国内 IP)，留空则不附带 |
+| `common.fakeip` | `116.25.146.177` | 请求音乐平台时附带的 `X-Forwarded-For`(Workers 从海外节点发出请求，部分接口需要国内 IP)，留空则不附带 |
 | `common.timezone` | `8` | 统计按天分组使用的时区(UTC 偏移小时) |
 | `common.allow_download_script` | `true` | 是否开放 `/script` 音源脚本下载 |
 | `common.parse_log_retention_days` | `30` | 解析记录保留天数，`0` 为不清理 |
@@ -312,6 +312,14 @@ Cloudflare 账号下有多个账户时，设置环境变量 `CLOUDFLARE_ACCOUNT_
 <summary><b>忘记管理员密码</b></summary>
 
 在 Cloudflare 控制台 → D1 → 数据库 → 控制台里执行 `DELETE FROM admins;`，然后重新设置 `ADMIN_PASSWORD`(或打开 `/admin` 重新创建)。用户和配置不受影响。
+</details>
+
+<details>
+<summary><b>酷狗：提示“本次请求需要验证”(20028)或“签名错误”(20006)</b></summary>
+
+- **20028**：酷狗不认可当前的伪装 IP。默认的 `116.25.146.177` 可以正常使用；如果仍然出现，在“配置 → 服务”里换一个国内 IP
+- **20006**：客户端类型和账号不匹配。**概念版**的 token 需要把“配置 → 酷狗音乐 → 客户端类型”设为 `3116`，签名 key、`pidversionsecret`、`pid` 会自动切换成概念版的值；普通版的 token 用 `1005`
+- 刷新登录提示 **20017**：token 已经失效，需要重新抓包获取
 </details>
 
 <details>

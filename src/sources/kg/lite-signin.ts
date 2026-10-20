@@ -6,7 +6,7 @@ import { FailedException } from '../../lib/errors';
 import { request } from '../../lib/http';
 import { log } from '../../lib/log';
 import { buildQuery, joinParams, now, pickRandom } from '../../lib/utils';
-import { sign } from './utils';
+import { errorHint, kgTools, sign } from './utils';
 
 const logger = log('kugou_lite_sign_in');
 
@@ -38,7 +38,8 @@ export async function doAccountSignin(ctx: AppContext, userInfo: Record<string, 
   let mixid = String(userInfo.lite_sign_in?.mixsongmid?.value ?? 'auto');
   if (mixid === 'auto') mixid = await randomMixSongMid(ctx);
   if (!/^\d+$/.test(mixid)) throw new FailedException('mixsongmid 必须是数字或 auto');
-  const clientver = String(ctx.config.get('module.kg.client.clientver'));
+  const tools = kgTools(ctx);
+  const clientver = tools.clientver;
   const body = `{"mixsongid":${mixid}}`;
   const params: Record<string, unknown> = {
     userid: userInfo.userid,
@@ -50,7 +51,7 @@ export async function doAccountSignin(ctx: AppContext, userInfo: Record<string, 
     uuid: randomHex(16),
     dfid: '-',
   };
-  params.signature = sign(params, body, String(ctx.config.get('module.kg.client.signatureKey')));
+  params.signature = sign(params, body, tools.signkey);
   const resp = await request(ctx, `https://gateway.kugou.com/v2/report/listen_song?${joinParams(params)}`, {
     method: 'POST',
     body,
@@ -64,7 +65,9 @@ export async function doAccountSignin(ctx: AppContext, userInfo: Record<string, 
   });
   const result = resp.jsonOrNull();
   if (!result || result.status !== 1) {
-    throw new FailedException(result?.error_msg || `签到失败(HTTP ${resp.status})`);
+    const code = result?.error_code ?? result?.errcode;
+    const hint = errorHint(code);
+    throw new FailedException(hint ? `签到失败(${code})：${hint}` : result?.error_msg || `签到失败(HTTP ${resp.status})`);
   }
   logger.info(`酷狗概念版账号(UID_${userInfo.userid})签到成功`);
 }

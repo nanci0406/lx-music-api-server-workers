@@ -36,8 +36,9 @@ export const SECTIONS: Section[] = [
       { key: 'common.cookiepool', label: '启用账号池(cookie 池)', type: 'bool',
         help: '开启后各平台使用 module.cookiepool 里的多个账号，单账号配置会被忽略。账号池可在“原始配置”里编辑，' +
           'QQ 音乐和网易云账号也可以在“音乐账号”页扫码后直接加入' },
-      { key: 'common.fakeip', label: '伪装国内 IP', type: 'text', placeholder: '1.0.1.114',
-        help: 'Workers 从海外节点访问音乐平台，部分接口需要国内 IP 才能正常返回；请求时会附带 X-Forwarded-For: 这个地址，留空则不附带' },
+      { key: 'common.fakeip', label: '伪装国内 IP', type: 'text', placeholder: '116.25.146.177',
+        help: 'Workers 从海外节点访问音乐平台，部分接口需要国内 IP 才能正常返回；请求时会附带 X-Forwarded-For: 这个地址，留空则不附带。' +
+          '需要是平台认可的国内地址，酷狗提示“本次请求需要验证”时请更换' },
       { key: 'common.timezone', label: '时区(UTC 偏移)', type: 'number', min: -12, max: 14, unit: '小时',
         help: '统计按天分组、任务时间显示使用的时区，中国大陆为 8' },
       { key: 'common.debug_mode', label: '调试日志', type: 'bool', help: '在 Workers 日志(wrangler tail 或控制台)中输出更详细的调试信息' },
@@ -120,7 +121,7 @@ export const SECTIONS: Section[] = [
       { key: 'module.kg.user.mid', label: 'mid', type: 'text' },
       { key: 'module.kg.client.appid', label: '客户端类型(appid)', type: 'select',
         options: [['1005', '安卓 (1005)'], ['3116', '概念版 (3116)'], ['1001', 'PC (1001)']],
-        help: '自动刷新登录只支持 1005 和 3116；3116 需要同时修改签名 key(在原始配置中)' },
+        help: '概念版账号的 token 请选 3116，签名参数(signatureKey、pidversionsecret、pid)会自动切换成概念版的；自动刷新登录只支持 1005 和 3116' },
       { key: 'module.kg.user.refresh_login.enable', label: '自动刷新登录(token 保活)', type: 'bool', help: 'token 30 天不刷新会失效' },
       { ...REFRESH_INTERVAL, key: 'module.kg.user.refresh_login.interval', label: '刷新间隔', depends: 'module.kg.user.refresh_login.enable' },
       { key: 'module.kg.user.refresh_login.login_url', depends: 'module.kg.user.refresh_login.enable', label: '刷新登录接口', type: 'text' },

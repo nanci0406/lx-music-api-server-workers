@@ -34,20 +34,51 @@ export interface KgTools {
   pid: string;
 }
 
+// 不同客户端(appid)对应的签名参数。概念版(3116)的账号必须用概念版的参数，否则酷狗返回 err signature(20006)
+export const CLIENT_PRESETS: Record<string, { signatureKey: string; pidversionsecret: string; pid: string }> = {
+  '1005': { signatureKey: 'OIlwieks28dk2k092lksi2UIkp', pidversionsecret: '57ae12eb6890223e355ccfcb74edf70d', pid: '2' },
+  '3116': { signatureKey: 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA', pidversionsecret: '185672dd44712f60bb1736df5a377e82', pid: '411' },
+};
+
+/**
+ * 客户端参数：配置里是空的、或者还是另一个客户端的预设值(只改了 appid)时，使用当前 appid 的预设值；
+ * 自己填写的其他值照原样使用
+ */
+function clientValue(c: AppContext['config'], appid: string, field: 'signatureKey' | 'pidversionsecret' | 'pid'): string {
+  const configured = String(c.get(`module.kg.client.${field}`) ?? '').trim();
+  const preset = CLIENT_PRESETS[appid];
+  if (!preset) return configured;
+  const otherPresets = Object.entries(CLIENT_PRESETS).filter(([id]) => id !== appid).map(([, p]) => p[field]);
+  return !configured || otherPresets.includes(configured) ? preset[field] : configured;
+}
+
 export function kgTools(ctx: AppContext): KgTools {
   const c = ctx.config;
+  const appid = String(c.get('module.kg.client.appid'));
   return {
-    signkey: String(c.get('module.kg.client.signatureKey')),
-    pidversec: String(c.get('module.kg.client.pidversionsecret')),
+    signkey: clientValue(c, appid, 'signatureKey'),
+    pidversec: clientValue(c, appid, 'pidversionsecret'),
     clientver: String(c.get('module.kg.client.clientver')),
     xRouter: c.get('module.kg.tracker.x-router') || { enable: false, value: '' },
     url: String(c.get('module.kg.tracker.host')) + String(c.get('module.kg.tracker.path')),
     version: String(c.get('module.kg.tracker.version')),
     extraParams: c.get('module.kg.tracker.extra_params') || {},
-    appid: String(c.get('module.kg.client.appid')),
+    appid,
     mid: String(c.get('module.kg.user.mid')),
-    pid: String(c.get('module.kg.client.pid')),
+    pid: clientValue(c, appid, 'pid'),
   };
+}
+
+// 酷狗接口常见的错误码
+const ERROR_HINTS: Record<string, string> = {
+  20006: '签名错误：客户端类型(appid)和签名参数不匹配，概念版账号请把 appid 设为 3116',
+  20017: 'token 无效或已过期，请重新获取 token',
+  20028: '酷狗要求验证这次请求，通常是伪装的国内 IP 不被认可，请在“配置 → 服务”里更换伪装国内 IP',
+};
+
+/** 把酷狗返回的错误码说明成人能看懂的话 */
+export function errorHint(code: unknown): string {
+  return code !== undefined && code !== null && code !== '' ? ERROR_HINTS[String(code)] || '' : '';
 }
 
 /** 签名：signkey + 按 key 排序后拼接的 k=v + 请求体 + signkey 的 MD5 */

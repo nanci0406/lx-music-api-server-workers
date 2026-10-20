@@ -8,8 +8,9 @@ export const DEFAULT_CONFIG = {
     log_length_limit: 500, // 单条日志长度限制
     parse_log_retention_days: 30, // 解析记录保留天数，超期记录每天自动清理，0 表示不清理
     timezone: 8, // 统计按天分组、日志时间使用的时区(UTC 偏移小时数)，中国大陆为 8
-    // 请求音乐平台时附带的 X-Forwarded-For。Workers 从海外节点发出请求，部分平台需要国内 IP 才能正常返回，留空则不附带
-    fakeip: '1.0.1.114',
+    // 请求音乐平台时附带的 X-Forwarded-For。Workers 从海外节点发出请求，部分平台需要国内 IP 才能正常返回，留空则不附带。
+    // 需要是平台认可的国内地址：酷狗不认 1.0.1.114(Python 版的默认值)，会要求“本次请求需要验证”(20028)
+    fakeip: '116.25.146.177',
     cookiepool: false, // 是否启用账号池(cookie 池)，启用后各平台从 module.cookiepool 中随机选择账号，单账号配置会被忽略
     allow_download_script: true, // 是否允许通过 /script?key=你的key 下载音源脚本
     download_config: { // 音源脚本的相关配置

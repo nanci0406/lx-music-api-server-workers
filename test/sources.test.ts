@@ -122,3 +122,62 @@ describe('歌词适配后端(gcsp)', () => {
     expect((await h().request('GET', '/client/api')).status).toBe(405);
   });
 });
+
+describe('酷狗客户端参数', () => {
+  it('appid 为 3116 时自动使用概念版的签名参数，自己填写的值照原样使用', async () => {
+    const { kgTools } = await import('../src/sources/kg/utils');
+    expect(kgTools(await h().context())).toMatchObject({ appid: '1005', signkey: 'OIlwieks28dk2k092lksi2UIkp', pid: '2' });
+    await h().writeConfig({ 'module.kg.client.appid': '3116' });
+    expect(kgTools(await h().context())).toMatchObject({
+      appid: '3116', signkey: 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA', pidversec: '185672dd44712f60bb1736df5a377e82', pid: '411',
+    });
+    await h().writeConfig({ 'module.kg.client.signatureKey': 'CUSTOM', 'module.kg.client.pid': '' });
+    expect(kgTools(await h().context())).toMatchObject({ signkey: 'CUSTOM', pid: '411' });
+  });
+
+  it('概念版取链接和刷新登录都用概念版的签名', async () => {
+    await h().writeConfig({
+      'module.kg.client.appid': '3116',
+      'module.kg.user': { token: 'T', userid: '42', mid: 'M', refresh_login: { enable: true, login_url: 'http://kg.test/login' } },
+    });
+    h().fetch.on(KG_INFO, json({ data: [[{ audio_info: { hash_128: 'H' } }]] }));
+    h().fetch.on('https://gateway.kugou.com/v5/url', json({ status: 1, url: ['http://kg/lite.mp3'] }));
+    h().fetch.on('http://kg.test/login', json({ error_code: 0, data: { userid: 42, token: 'T2' } }));
+    const ctx = await h().context();
+    const { url } = await import('../src/sources/kg/player');
+    await url(ctx, 'h', '128k');
+    const { refresh } = await import('../src/sources/kg/refresh-login');
+    await refresh(ctx);
+    const urlCall = h().fetch.callsTo('https://gateway.kugou.com/v5/url')[0];
+    const urlParams = Object.fromEntries(new URL(urlCall.url).searchParams);
+    expect(urlParams).toMatchObject({ appid: '3116', pid: '411', key: md5('h' + '185672dd44712f60bb1736df5a377e82' + '3116' + 'M' + '42') });
+    const { signature: urlSignature, ...urlRest } = urlParams;
+    expect(urlSignature).toBe(kgSign(urlRest, '', 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA'));
+    const loginCall = h().fetch.callsTo('http://kg.test/login')[0];
+    const { signature, ...rest } = Object.fromEntries(new URL(loginCall.url).searchParams);
+    expect(signature).toBe(kgSign(rest, loginCall.body, 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA'));
+  });
+
+  it('错误码说明原因：需要验证、签名错误、token 失效', async () => {
+    h().fetch.on(KG_INFO, json({ data: [[{ audio_info: { hash_128: 'H' } }]] }));
+    const answers = [{ errcode: 20028, status: 2, error: '本次请求需要验证' }, { errcode: '20006', status: 0, errmsg: 'err signature' }];
+    h().fetch.on('https://gateway.kugou.com/v5/url', () => json(answers.shift()));
+    const ctx = await h().context();
+    const { url } = await import('../src/sources/kg/player');
+    await expect(url(ctx, 'h', '128k')).rejects.toThrow('链接获取失败(20028)：酷狗要求验证这次请求');
+    await expect(url(ctx, 'h', '128k')).rejects.toThrow('链接获取失败(20006)：签名错误');
+    await h().writeConfig({ 'module.kg.user': { token: 'T', userid: '1', refresh_login: { enable: true, login_url: 'http://kg.test/login' } } });
+    h().fetch.on('http://kg.test/login', json({ error_code: 20017, data: null }));
+    const { refresh } = await import('../src/sources/kg/refresh-login');
+    await expect(refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20017)：token 无效或已过期');
+  });
+});
+
+describe('旧的默认值', () => {
+  it('已保存的旧伪装 IP(1.0.1.114)按新的默认值处理，自己改过的值不变', async () => {
+    await h().writeConfig({ 'common.fakeip': '1.0.1.114' });
+    expect((await h().config()).get('common.fakeip')).toBe('116.25.146.177');
+    await h().writeConfig({ 'common.fakeip': '220.181.1.1' });
+    expect((await h().config()).get('common.fakeip')).toBe('220.181.1.1');
+  });
+});

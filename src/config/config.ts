@@ -40,7 +40,7 @@ export class Config {
 
   static fromRow(db: D1Database, row: ConfigRow | null, legacy: Record<string, any> = {}): Config {
     const stored = row ? parseStored(row.value) : legacy;
-    return new Config(db, deepMerge(DEFAULT_CONFIG, stored), row ? Number(row.version) : 0);
+    return new Config(db, upgradeDefaults(deepMerge(DEFAULT_CONFIG, stored)), row ? Number(row.version) : 0);
   }
 
   static async readRow(db: D1Database): Promise<ConfigRow | null> {
@@ -73,7 +73,7 @@ export class Config {
   async update(mutate: (data: Record<string, any>) => boolean | void): Promise<boolean> {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const row = await Config.readRow(this.db);
-      const data = deepMerge(DEFAULT_CONFIG, row ? parseStored(row.value) : await readLegacyConfig(this.db));
+      const data = upgradeDefaults(deepMerge(DEFAULT_CONFIG, row ? parseStored(row.value) : await readLegacyConfig(this.db)));
       if (mutate(data) === false) return false;
       const text = JSON.stringify(data);
       const ts = now();
@@ -131,6 +131,19 @@ export class Config {
   text(): string {
     return JSON.stringify(this.data, null, 2);
   }
+}
+
+// 以前的默认值后来发现有问题时，已保存的旧默认值按新的默认值处理(用户自己改过的值不受影响)
+const OUTDATED_DEFAULTS: [string, unknown][] = [
+  // 酷狗不把这个地址当作国内 IP，取链接会被要求验证
+  ['common.fakeip', '1.0.1.114'],
+];
+
+function upgradeDefaults(data: Record<string, any>): Record<string, any> {
+  for (const [path, value] of OUTDATED_DEFAULTS) {
+    if (getPath(data, path) === value) setPath(data, path, getPath(DEFAULT_CONFIG, path));
+  }
+  return data;
 }
 
 // ---------------------------------------------------------------------------

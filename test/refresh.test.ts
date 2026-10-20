@@ -170,7 +170,7 @@ describe('酷狗刷新登录', () => {
     expect(signature).toBe(sign(rest, call.body, 'OIlwieks28dk2k092lksi2UIkp'));
   });
 
-  it('概念版使用自己的 AES 参数；不支持的 appid 和失败都返回 false', async () => {
+  it('概念版使用自己的 AES 参数；不支持的 appid 返回 false，接口失败时抛出带错误码的原因', async () => {
     await h().writeConfig({ 'module.kg.user': { token: 'T', userid: '1', mid: 'm', refresh_login: { enable: true, login_url: 'http://kg.test/login' } } });
     h().fetch.on('http://kg.test/login', json({ error_code: 0, data: { userid: 1, token: 'T2' } }));
     await kgRefresh.refresh(await h().context());
@@ -183,6 +183,6 @@ describe('酷狗刷新登录', () => {
     await h().writeConfig({ 'module.kg.client.appid': '1005' });
     h().fetch.routes = [];
     h().fetch.on('http://kg.test/login', json({ error_code: 20018 }));
-    expect(await kgRefresh.refresh(await h().context())).toBe(false);
+    await expect(kgRefresh.refresh(await h().context())).rejects.toThrow('刷新登录失败(code: 20018)');
   });
 });
